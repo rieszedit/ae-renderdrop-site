@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AE RenderDrop — レンダリング通知 & 自動アップロード for After Effects</title>
+    <meta name="description" content="After Effectsのレンダリング完了をDiscordにリアルタイム通知。Dropbox/Google Drive自動アップロード対応のCEPエクステンション。">
+    <meta property="og:title" content="AE RenderDrop">
+    <meta property="og:description" content="After Effectsのレンダリング完了をDiscordにリアルタイム通知するCEPエクステンション">
+    <meta property="og:type" content="website">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deepest: #0a0a0c;
+            --bg-dark: #141418;
+            --bg-panel: #1e1e24;
+            --bg-surface: #252530;
+            --bg-elevated: #2a2a36;
+            --border: #333340;
+            --border-subtle: #2a2a35;
+            --text-primary: #f0f0f2;
+            --text-secondary: #a0a0b0;
+            --text-muted: #666680;
+            --ae-blue: #00d4ff;
+            --ae-purple: #9999ff;
+            --ae-gradient: linear-gradient(135deg, #00d4ff 0%, #9999ff 50%, #d4a0ff 100%);
+            --discord-purple: #5865F2;
+            --booth-red: #fc4d50;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Inter', 'Noto Sans JP', -apple-system, sans-serif;
+            background: var(--bg-deepest);
+            color: var(--text-primary);
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+
+        /* ===== NAV ===== */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            padding: 16px 32px;
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(10, 10, 12, 0.85);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(51, 51, 64, 0.4);
+        }
+
+        .nav-logo {
+            display: flex; align-items: center; gap: 10px;
+            font-weight: 700; font-size: 16px; letter-spacing: -0.3px;
+        }
+        .nav-logo svg { opacity: 0.9; }
+
+        .nav-links { display: flex; align-items: center; gap: 8px; }
+
+        .nav-link {
+            color: var(--text-secondary); text-decoration: none;
+            font-size: 13px; font-weight: 500;
+            padding: 8px 16px; border-radius: 8px; transition: all 0.2s;
+        }
+        .nav-link:hover { color: var(--text-primary); background: var(--bg-surface); }
+
+        .nav-cta {
+            background: var(--booth-red); color: #fff; font-weight: 600;
+            padding: 8px 20px; border-radius: 8px; text-decoration: none;
+            font-size: 13px; transition: all 0.2s;
+        }
+        .nav-cta:hover { background: #e04245; transform: translateY(-1px); }
+
+        /* ===== HERO ===== */
+        .hero {
+            min-height: 100vh;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            text-align: center; padding: 120px 32px 80px; position: relative;
+        }
+
+        .hero::before {
+            content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+            width: 800px; height: 600px;
+            background: radial-gradient(ellipse, rgba(0, 212, 255, 0.06) 0%, rgba(153, 153, 255, 0.03) 40%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--bg-surface); border: 1px solid var(--border);
+            border-radius: 100px; padding: 6px 16px 6px 8px;
+            font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 32px;
+        }
+
+        .hero-badge-dot {
+            width: 8px; height: 8px; background: #4ade80;
+            border-radius: 50%; animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .hero h1 {
+            font-size: clamp(40px, 6vw, 72px); font-weight: 800;
+            letter-spacing: -2px; line-height: 1.1; margin-bottom: 24px;
+        }
+
+        .hero h1 span {
+            background: var(--ae-gradient);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+
+        .hero-sub {
+            font-size: clamp(16px, 2vw, 20px); color: var(--text-secondary);
+            max-width: 560px; margin-bottom: 40px; font-weight: 300;
+        }
+
+        .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 14px 28px; border-radius: 12px; font-size: 15px;
+            font-weight: 600; text-decoration: none; transition: all 0.25s;
+            cursor: pointer; border: none;
+        }
+
+        .btn-primary { background: var(--ae-gradient); color: #0a0a0c; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0, 212, 255, 0.25); }
+
+        .btn-secondary { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: var(--bg-elevated); transform: translateY(-2px); }
+
+        /* ===== NOTIFICATION PREVIEW ===== */
+        .notification-section { padding: 80px 32px; display: flex; justify-content: center; }
+
+        .notification-preview {
+            max-width: 520px; width: 100%;
+            background: #36393f; border-radius: 12px; padding: 20px;
+            font-family: 'Inter', sans-serif;
+            border-left: 4px solid #43b581; position: relative;
+        }
+
+        .notification-preview::before {
+            content: 'Discord'; position: absolute; top: -28px; left: 0;
+            font-size: 12px; color: var(--text-muted); font-weight: 500;
+            letter-spacing: 1px; text-transform: uppercase;
+        }
+
+        .notif-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+
+        .notif-avatar {
+            width: 28px; height: 28px; background: var(--discord-purple);
+            border-radius: 50%; display: flex; align-items: center;
+            justify-content: center; font-size: 14px;
+        }
+
+        .notif-name { font-weight: 600; font-size: 14px; color: #fff; }
+        .notif-time { font-size: 11px; color: #72767d; }
+
+        .notif-body { font-size: 14px; color: #dcddde; line-height: 1.6; font-family: 'Inter', sans-serif; }
+        .notif-body .line { display: block; margin-bottom: 2px; }
+
+        /* ===== FEATURES ===== */
+        .features { padding: 80px 32px 100px; max-width: 1000px; margin: 0 auto; }
+
+        .section-label {
+            text-align: center; font-size: 12px; font-weight: 600;
+            letter-spacing: 2px; text-transform: uppercase;
+            color: var(--ae-blue); margin-bottom: 12px;
+        }
+
+        .section-title {
+            text-align: center; font-size: clamp(28px, 4vw, 40px);
+            font-weight: 700; letter-spacing: -1px; margin-bottom: 56px;
+        }
+
+        .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+
+        .feature-card {
+            background: var(--bg-panel); border: 1px solid var(--border-subtle);
+            border-radius: 16px; padding: 32px 28px; transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border); transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .feature-icon { font-size: 32px; margin-bottom: 16px; }
+        .feature-name { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+        .feature-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+
+        /* ===== VIDEO ===== */
+        .video-section { padding: 60px 32px 100px; max-width: 800px; margin: 0 auto; }
+
+        .video-wrapper {
+            position: relative; padding-bottom: 56.25%; border-radius: 16px;
+            overflow: hidden; border: 1px solid var(--border);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .video-wrapper iframe {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;
+        }
+
+        /* ===== HOW IT WORKS ===== */
+        .how-section { padding: 80px 32px 100px; max-width: 700px; margin: 0 auto; }
+
+        .step { display: flex; gap: 20px; margin-bottom: 32px; align-items: flex-start; }
+
+        .step-num {
+            flex-shrink: 0; width: 36px; height: 36px;
+            background: var(--bg-surface); border: 1px solid var(--border);
+            border-radius: 10px; display: flex; align-items: center;
+            justify-content: center; font-weight: 700; font-size: 14px; color: var(--ae-blue);
+        }
+
+        .step-content h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+        .step-content p { font-size: 14px; color: var(--text-secondary); }
+        .step-content a { color: var(--ae-blue); text-decoration: none; }
+        .step-content a:hover { text-decoration: underline; }
+
+        /* ===== CTA ===== */
+        .cta-section { padding: 100px 32px; text-align: center; position: relative; }
+
+        .cta-section::before {
+            content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+            width: 600px; height: 400px;
+            background: radial-gradient(ellipse, rgba(153, 153, 255, 0.05) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .cta-title {
+            font-size: clamp(28px, 4vw, 40px); font-weight: 700;
+            letter-spacing: -1px; margin-bottom: 16px;
+        }
+
+        .cta-sub { font-size: 16px; color: var(--text-secondary); margin-bottom: 12px; }
+
+        .cta-price {
+            font-size: 40px; font-weight: 800; margin-bottom: 32px;
+            background: var(--ae-gradient);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+
+        .cta-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+        .btn-booth {
+            background: var(--booth-red); color: #fff;
+            font-size: 16px; padding: 16px 36px;
+        }
+        .btn-booth:hover {
+            background: #e04245; transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(252, 77, 80, 0.3);
+        }
+
+        .btn-x { background: #000; color: #fff; border: 1px solid #333; }
+        .btn-x:hover { background: #1a1a1a; transform: translateY(-2px); }
+
+        /* ===== FOOTER ===== */
+        footer {
+            padding: 40px 32px; border-top: 1px solid var(--border-subtle);
+            display: flex; justify-content: space-between; align-items: center;
+            max-width: 1000px; margin: 0 auto;
+        }
+
+        .footer-left { font-size: 13px; color: var(--text-muted); }
+        .footer-links { display: flex; gap: 20px; }
+        .footer-links a { color: var(--text-muted); text-decoration: none; font-size: 13px; transition: color 0.2s; }
+        .footer-links a:hover { color: var(--text-secondary); }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            nav { padding: 12px 20px; }
+            .nav-link { display: none; }
+            .feature-grid { grid-template-columns: 1fr; }
+            .hero { padding: 100px 24px 60px; }
+            .hero h1 { letter-spacing: -1px; }
+            footer { flex-direction: column; gap: 16px; text-align: center; }
+        }
+
+        @media (max-width: 480px) {
+            .hero-actions { flex-direction: column; align-items: center; }
+            .btn { width: 100%; max-width: 280px; justify-content: center; }
+        }
+
+        /* ===== ANIMATIONS ===== */
+        .fade-in { opacity: 0; transform: translateY(20px); transition: opacity 0.6s ease, transform 0.6s ease; }
+        .fade-in.visible { opacity: 1; transform: translateY(0); }
+    </style>
+</head>
+<body>
+
+    <!-- NAV -->
+    <nav>
+        <div class="nav-logo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="5" width="14" height="10" rx="2" fill="#f0f0f2" opacity="0.3"/>
+                <rect x="5" y="7" width="14" height="10" rx="2" fill="#f0f0f2" opacity="0.5"/>
+                <rect x="7" y="9" width="14" height="10" rx="2" fill="#f0f0f2"/>
+            </svg>
+            RenderDrop
+        </div>
+        <div class="nav-links">
+            <a href="#features" class="nav-link">Features</a>
+            <a href="#demo" class="nav-link">Demo</a>
+            <a href="#setup" class="nav-link">Setup</a>
+            <a href="https://rieszedit.booth.pm/items/7979020" target="_blank" class="nav-cta">購入する</a>
+        </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="hero-badge">
+            <span class="hero-badge-dot"></span>
+            CEP Extension for After Effects
+        </div>
+        <h1>
+            レンダリング完了を<br><span>Discord</span>に通知。
+        </h1>
+        <p class="hero-sub">
+            After Effects のレンダリング状況をリアルタイムに Discord 通知。<br>
+            Dropbox / Google Drive への自動アップロードにも対応。
+        </p>
+        <div class="hero-actions">
+            <a href="https://rieszedit.booth.pm/items/7979020" target="_blank" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1.003 1.003 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                Booth で購入 — ¥800
+            </a>
+            <a href="#demo" class="btn btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                デモを見る
+            </a>
+        </div>
+    </section>
+
+    <!-- DISCORD NOTIFICATION PREVIEW -->
+    <section class="notification-section fade-in">
+        <div class="notification-preview">
+            <div class="notif-header">
+                <div class="notif-avatar">🎬</div>
+                <span class="notif-name">AE RenderDrop</span>
+                <span class="notif-time">今日 15:42</span>
+            </div>
+            <div class="notif-body">
+                <span class="line">✅ <strong>main_comp</strong> のレンダリングが完了しました</span>
+                <span class="line">📐 1920 × 1080 @ 29.97fps</span>
+                <span class="line">⏱️ 00:01:30:00 (2697 frames)</span>
+                <span class="line">🏞️ H.264 - Match Render Settings</span>
+                <span class="line">📦 245.3 MB</span>
+                <span class="line">⏳ 3m 42s</span>
+                <span class="line">📂 C:\\output\\main_comp.mp4</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section class="features fade-in" id="features">
+        <p class="section-label">Features</p>
+        <h2 class="section-title">PC の前で待たなくていい</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🔔</div>
+                <div class="feature-name">Discord リアルタイム通知</div>
+                <div class="feature-desc">レンダリングの開始・完了・エラーを即座に Discord Webhook で通知。スマホからでも確認できます。</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <div class="feature-name">詳細メタデータ</div>
+                <div class="feature-desc">解像度・FPS・再生時間・フレーム数・ファイルサイズ・レンダリング時間を自動で通知に表示。</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📤</div>
+                <div class="feature-name">自動アップロード</div>
+                <div class="feature-desc">Dropbox / Google Drive に完成ファイルを自動アップロード。共有リンクも Discord に送信。</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <div class="feature-name">2つの通知モード</div>
+                <div class="feature-desc">各コンポごとの「個別通知」と、全完了後にまとめる「サマリー通知」を選択可能。</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-name">ゼロ設定で開始</div>
+                <div class="feature-desc">Discord Webhook URL を貼り付けるだけ。Node.js 不要、追加ソフト不要、管理者権限不要。</div>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🌏</div>
+                <div class="feature-name">日本語ファイル対応</div>
+                <div class="feature-desc">日本語ファイル名のプロジェクトや出力ファイルも正しく処理・アップロードできます。</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- VIDEO DEMO -->
+    <section class="video-section fade-in" id="demo">
+        <p class="section-label">Demo</p>
+        <h2 class="section-title">使い方</h2>
+        <div class="video-wrapper">
+            <iframe src="https://www.youtube.com/embed/c5-R_cgPoFc?si=W9PpnrT59LrDveR3" title="AE RenderDrop デモ" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+        </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="how-section fade-in" id="setup">
+        <p class="section-label">Setup</p>
+        <h2 class="section-title">かんたん 3 ステップ</h2>
+
+        <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+                <h3>ZXP をインストール</h3>
+                <p><a href="https://install.anastasiy.com/" target="_blank">Anastasiy's Extension Manager</a>（無料）でダウンロードした ZXP ファイルを開く</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+                <h3>Discord Webhook URL を設定</h3>
+                <p>AE のパネルで ⚙️ → Webhook URL を貼り付けて保存</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+                <h3>レンダリングするだけ</h3>
+                <p>あとはいつも通りレンダリング。完了通知が Discord に届きます 🎉</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section fade-in">
+        <h2 class="cta-title">レンダリング待ちから解放される</h2>
+        <p class="cta-sub">After Effects 2022 以降対応 · Windows / Mac</p>
+        <div class="cta-price">¥800</div>
+        <div class="cta-actions">
+            <a href="https://rieszedit.booth.pm/items/7979020" target="_blank" class="btn btn-booth">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1.003 1.003 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                Booth で購入する
+            </a>
+            <a href="https://x.com/Riesz_edit" target="_blank" class="btn btn-x">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                @Riesz_edit
+            </a>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+        <div class="footer-left">© 2026 rieszedit — AE RenderDrop v2.0.0</div>
+        <div class="footer-links">
+            <a href="https://x.com/Riesz_edit" target="_blank">X (Twitter)</a>
+            <a href="https://rieszedit.booth.pm/items/7979020" target="_blank">Booth</a>
+        </div>
+    </footer>
+
+    <!-- SCROLL ANIMATION -->
+    <script>
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    </script>
+</body>
+</html>
